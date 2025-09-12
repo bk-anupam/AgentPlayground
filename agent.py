@@ -97,13 +97,10 @@ class WebContentExtractionAgent:
                 
                 state["messages"] = [HumanMessage(content=system_prompt)]
             
-            # Use the current state messages
-            messages_for_llm = list(state["messages"])
-
             # If a tool just ran, add a specific guiding prompt based on which tool was executed.
             # This makes the agent more robust, especially for 'flash' models.
-            if messages_for_llm and isinstance(messages_for_llm[-1], ToolMessage):
-                last_tool_message = messages_for_llm[-1]                
+            if state["messages"] and isinstance(state["messages"][-1], ToolMessage):
+                last_tool_message = state["messages"][-1]                
                 if last_tool_message.name == "tavily-map":
                     # Inject the tool's output directly into the guiding prompt.
                     guiding_prompt = (
@@ -112,7 +109,7 @@ class WebContentExtractionAgent:
                         "Please analyze this site map and proceed with the next step of the plan: "
                         "find the specific URL for the hindi murli for date 2025-09-08 and then call the `tavily-extract` tool with that single URL."
                     )
-                    messages_for_llm.append(HumanMessage(content=guiding_prompt))
+                    state["messages"].append(HumanMessage(content=guiding_prompt))
                 elif last_tool_message.name == "tavily-extract":
                     # Inject the tool's output directly into the guiding prompt.
                     guiding_prompt = (
@@ -121,15 +118,15 @@ class WebContentExtractionAgent:
                         "This is the final step. Please present the extracted hindi murli content to the user as your final answer. "
                         "Do not call any more tools."
                     )
-                    messages_for_llm.append(HumanMessage(content=guiding_prompt))
+                    state["messages"].append(HumanMessage(content=guiding_prompt))
 
             # Ensure we have messages to send
-            if not messages_for_llm:
+            if not state["messages"]:
                 logger.error("No messages to send to LLM")
                 return state
                 
             # Get response from LLM using the processed messages
-            response = await self.llm_with_tools.ainvoke(messages_for_llm)
+            response = await self.llm_with_tools.ainvoke(state["messages"])
             state["messages"].append(response)            
             return state
         
