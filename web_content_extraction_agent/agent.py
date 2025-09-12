@@ -1,20 +1,14 @@
 import asyncio
-from typing import TypedDict, List, Annotated, Sequence
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import ToolNode
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
-from langchain_core.tools import BaseTool
-from pydantic import BaseModel, Field
-import json
 from logger import logger
-from config import Config  
+from web_content_extraction_agent.process_tavily_extract_output import process_tavily_tools
+from web_content_extraction_agent.config import Config  
 from langchain_mcp_adapters.client import MultiServerMCPClient
-
-# Define the agent state
-class AgentState(TypedDict):
-    messages: Annotated[Sequence[BaseMessage], "The messages in the conversation"]
+from web_content_extraction_agent.state import AgentState
 
 
 class WebContentExtractionAgent:
@@ -111,15 +105,20 @@ class WebContentExtractionAgent:
                     )
                     state["messages"].append(HumanMessage(content=guiding_prompt))
                 elif last_tool_message.name == "tavily-extract":
-                    # Inject the tool's output directly into the guiding prompt.
+                    # After processing, the clean content is in state['documents'].
+                    # We use this clean content to prompt the LLM for the final answer.
+                    extracted_content = ""
+                    if state.get("documents"):
+                        extracted_content = "\n\n".join([doc.page_content for doc in state["documents"]])
+
                     guiding_prompt = (
-                        f"The `tavily-extract` tool has returned the following page content:\n\n"
-                        f"```\n{last_tool_message.content}\n```\n\n"
+                        f"The `tavily-extract` tool has run and the content has been processed. Here is the extracted page content:\n\n"
+                        f"```\n{extracted_content}\n```\n\n"
                         "This is the final step. Please present the extracted hindi murli content to the user as your final answer. "
                         "Do not call any more tools."
                     )
                     state["messages"].append(HumanMessage(content=guiding_prompt))
-
+            
             # Ensure we have messages to send
             if not state["messages"]:
                 logger.error("No messages to send to LLM")
@@ -136,6 +135,24 @@ class WebContentExtractionAgent:
     def create_tool_node(self):
         """Create the tool execution node"""
         return ToolNode(self.tools)
+
+
+    def create_process_tool_output_node(self):
+        """Create a node to process the output of tools, specifically tavily-extract."""
+        def process_tool_output_node(state: AgentState) -> AgentState:
+            last_message = state["messages"][-1]
+            if not isinstance(last_message, ToolMessage):
+                return state
+
+            if last_message.name == "tavily-extract":
+                logger.info(f"Processing output from tool: {last_message.name}")
+                updated_state = process_tavily_tools(last_message.name, last_message.content, state)
+                # Merge the updated state
+                state["documents"] = updated_state.get("documents", [])
+                logger.info(f"Updated state with {len(state['documents'])} processed documents.")
+            
+            return state
+        return process_tool_output_node
     
 
     def should_continue(self, state: AgentState) -> str:
@@ -158,10 +175,12 @@ class WebContentExtractionAgent:
         workflow = StateGraph(AgentState)        
         # Create nodes
         agent_node = self.create_agent_node()
-        tool_node = self.create_tool_node()        
+        tool_node = self.create_tool_node()
+        process_tool_output_node = self.create_process_tool_output_node()
         # Add nodes to the graph
         workflow.add_node("agent", agent_node)
-        workflow.add_node("tools", tool_node)        
+        workflow.add_node("tools", tool_node)
+        workflow.add_node("process_tool_output", process_tool_output_node)
         # Set entry point
         workflow.set_entry_point("agent")        
         # Add conditional edges
@@ -174,8 +193,9 @@ class WebContentExtractionAgent:
                 "end": END
             }
         )        
-        # After tools, always go back to agent
-        workflow.add_edge("tools", "agent")        
+        # After tools, go to processing node, then back to the agent
+        workflow.add_edge("tools", "process_tool_output")
+        workflow.add_edge("process_tool_output", "agent")
         # Compile with memory
         memory = MemorySaver()
         agent_graph = workflow.compile(checkpointer=memory)        
