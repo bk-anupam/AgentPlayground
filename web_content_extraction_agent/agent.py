@@ -215,19 +215,18 @@ async def execute_agent_graph(agent_graph: StateGraph, config_dict):
     async for event in agent_graph.astream({"messages": []}, config_dict):
         for node_name, node_state in event.items():
             logger.info(f"Executing node: {node_name}")
-            
-            if "messages" in node_state:
-                last_message = node_state["messages"][-1]
+            if node_name != "process_tool_output":                
+                if "messages" in node_state:
+                    last_message = node_state["messages"][-1]                    
+                    if hasattr(last_message, 'content') and last_message.content:
+                        content_preview = f"{last_message.content}"
+                        logger.info(f"Message: {content_preview}")
+                    
+                    if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+                        for tool_call in last_message.tool_calls:
+                            logger.info(f"Tool Call: {tool_call['name']} with args: {tool_call['args']}")
                 
-                if hasattr(last_message, 'content') and last_message.content:
-                    content_preview = f"{last_message.content}"
-                    logger.info(f"Message: {content_preview}")
-                
-                if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
-                    for tool_call in last_message.tool_calls:
-                        logger.info(f"Tool Call: {tool_call['name']} with args: {tool_call['args']}")
-                
-                final_state = node_state
+            final_state = node_state
     
     logger.info("Extraction process complete.")
     if final_state:
