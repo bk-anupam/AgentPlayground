@@ -97,27 +97,32 @@ class WebContentExtractionAgent:
                 
                 state["messages"] = [HumanMessage(content=system_prompt)]
             
-            # Create a proper conversation history for Google Generative AI
-            messages_for_llm = []
-            
-            for message in state["messages"]:
-                if isinstance(message, ToolMessage):
-                    # Convert ToolMessage to HumanMessage
-                    logger.debug("Converting ToolMessage to HumanMessage for model consumption.")
-                    messages_for_llm.append(HumanMessage(
-                        content=f"Tool {message.name} returned:\n\n{message.content}"
-                    ))
-                else:
-                    messages_for_llm.append(message)
-            
-            # Ensure the last message is a HumanMessage (required by Google Generative AI)
-            if messages_for_llm and not isinstance(messages_for_llm[-1], HumanMessage):
-                # If the last message is an AIMessage, add a continuation prompt
-                messages_for_llm.append(HumanMessage(
-                    content="Please continue with the next step based on the information above."
-                ))
-            
-            # messages_for_llm = state["messages"]
+            # Use the current state messages
+            messages_for_llm = list(state["messages"])
+
+            # If a tool just ran, add a specific guiding prompt based on which tool was executed.
+            # This makes the agent more robust, especially for 'flash' models.
+            if messages_for_llm and isinstance(messages_for_llm[-1], ToolMessage):
+                last_tool_message = messages_for_llm[-1]                
+                if last_tool_message.name == "tavily-map":
+                    # Inject the tool's output directly into the guiding prompt.
+                    guiding_prompt = (
+                        f"The `tavily-map` tool has returned the following site map:\n\n"
+                        f"```\n{last_tool_message.content}\n```\n\n"
+                        "Please analyze this site map and proceed with the next step of the plan: "
+                        "find the specific URL for the hindi murli for date 2025-09-08 and then call the `tavily-extract` tool with that single URL."
+                    )
+                    messages_for_llm.append(HumanMessage(content=guiding_prompt))
+                elif last_tool_message.name == "tavily-extract":
+                    # Inject the tool's output directly into the guiding prompt.
+                    guiding_prompt = (
+                        f"The `tavily-extract` tool has returned the following page content:\n\n"
+                        f"```\n{last_tool_message.content}\n```\n\n"
+                        "This is the final step. Please present the extracted hindi murli content to the user as your final answer. "
+                        "Do not call any more tools."
+                    )
+                    messages_for_llm.append(HumanMessage(content=guiding_prompt))
+
             # Ensure we have messages to send
             if not messages_for_llm:
                 logger.error("No messages to send to LLM")
