@@ -162,3 +162,25 @@ class OutlookFetcher(BaseEmailFetcher):
         except Exception as e:
             logger.error(f"Error parsing Outlook email with ID {raw_email.get('id', 'N/A')}: {e}")
             return None
+        
+
+if __name__ == "__main__":
+    logger.info("--- Starting OutlookFetcher Test ---")
+
+    # This test relies on Google Secret Manager for credentials.
+    # Ensure you have run 'gcloud auth application-default login' and created the secrets.
+    fetcher = OutlookFetcher()
+
+    # The first time you run this, it will start a device flow for authentication.
+    # It will then save the token to Google Secret Manager.
+    emails = fetcher.get_emails(max_count=3)
+
+    if emails:
+        logger.info(f"Successfully fetched {len(emails)} emails.")
+        for i, email in enumerate(emails):
+            print("\n" + "="*20 + f" EMAIL {i+1} " + "="*20)
+            print(f"ID: {email['id']}")
+            print(f"From: {email['sender']}")
+            print(f"Subject: {email['subject']}")
+            print(f"Body Preview: {email['body'][:200].strip()}...")
+            print("="*50)

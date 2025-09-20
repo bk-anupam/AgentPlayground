@@ -63,6 +63,7 @@ class GmailFetcher(BaseEmailFetcher):
     CREDENTIALS_SECRET_ID = "gmail-credentials"
     TOKEN_SECRET_ID = "gmail-token"
 
+
     def connect(self) -> Optional[Any]:
         """
         Connects to the Gmail API using credentials stored in Google Secret Manager.
@@ -139,6 +140,7 @@ class GmailFetcher(BaseEmailFetcher):
             logger.error(f"An error occurred connecting to Gmail: {error}")
             return None
 
+
     def fetch_raw_unread_emails(self, service: Any, max_count: int = 10) -> List[Dict[str, Any]]:
         try:
             results = service.users().messages().list(userId="me", labelIds=["INBOX"], q="is:unread", maxResults=max_count).execute()
@@ -155,6 +157,7 @@ class GmailFetcher(BaseEmailFetcher):
         except HttpError as error:
             logger.error(f"An error occurred fetching emails: {error}")
             return []
+
 
     def parse_email(self, raw_email: Dict[str, Any]) -> Optional[EmailObject]:
         """Parses the complex Gmail API message object."""
@@ -193,29 +196,24 @@ class GmailFetcher(BaseEmailFetcher):
             logger.error(f"Error parsing email with ID {raw_email.get('id', 'N/A')}: {e}")
             return None
 
-# --- LangGraph Node ---
 
-def fetch_emails_node(state: RefinedEmailAgentState) -> RefinedEmailAgentState:
-    """
-    The entry point node for the graph. Fetches new emails and populates the state.
-    """
-    logger.info("--- Entering fetch_emails_node ---")
-    
+if __name__ == "__main__":
+    logger.info("--- Starting GmailFetcher Test ---")
+
+    # This test relies on Google Secret Manager for credentials.
+    # Ensure you have run 'gcloud auth application-default login' and created the secrets.
     fetcher = GmailFetcher()
-    emails = fetcher.get_emails(max_count=5) # Fetch up to 5 emails per run
-    
-    # Initialize or update the state
-    state["inbox"] = emails
-    state["current_email_index"] = 0 if emails else -1 # -1 indicates no emails to process
-    state["processed_email_ids"] = []
-    
-    # Clear per-email state fields for the new run
-    state["current_email"] = None
-    state["classification"] = None
-    state["summary"] = None
-    state["extracted_data"] = None
-    state["messages"] = []
 
-    logger.info(f"Node finished. Found {len(emails)} emails to process.")
-    return state
+    # The first time you run this, it will start a device flow for authentication.
+    # It will then save the token to Google Secret Manager.
+    emails = fetcher.get_emails(max_count=3)
 
+    if emails:
+        logger.info(f"Successfully fetched {len(emails)} emails.")
+        for i, email in enumerate(emails):
+            print("\n" + "="*20 + f" EMAIL {i+1} " + "="*20)
+            print(f"ID: {email['id']}")
+            print(f"From: {email['sender']}")
+            print(f"Subject: {email['subject']}")
+            print(f"Body Preview: {email['body'][:200].strip()}...")
+            print("="*50)
