@@ -25,15 +25,15 @@ The agent's architecture is designed for modularity, extensibility, and intellig
 
 ### 3. Core Components
 
-#### 3.1. Agent State (`RefinedEmailAgentState`)
+#### 3.1. Agent State (`EmailAgentState`)
 
-The `RefinedEmailAgentState` is the central data structure that holds all information relevant to the agent's current operation. It acts as the agent's memory, accumulating and updating data as it progresses through the graph.
+The `EmailAgentState` is the central data structure that holds all information relevant to the agent's current operation. It acts as the agent's memory, accumulating and updating data as it progresses through the graph.
 
 ```python
 from typing import TypedDict, List, Annotated, Sequence, Literal, Dict, Any, Optional
 from langchain_core.messages import BaseMessage
 
-class EmailObject(TypedDict):
+class Email(TypedDict):
     """A structured representation of a single email."""
     id: str
     sender: str
@@ -47,7 +47,7 @@ class UserPreferences(TypedDict):
     auto_archive_rules: Dict[str, Any]
     approval_required_for: List[str]  # e.g., ["send_email", "create_event"]
 
-class RefinedEmailAgentState(TypedDict):
+class EmailAgentState(TypedDict):
     """
     The central state for the email agent. It's passed between nodes in the graph,
     accumulating data as the agent processes emails.
@@ -72,7 +72,7 @@ class RefinedEmailAgentState(TypedDict):
 
 **Key Fields:**
 
-*   `inbox`: A list of `EmailObject` instances representing the batch of emails to be processed.
+*   `inbox`: A list of `Email` instances representing the batch of emails to be processed.
 *   `current_email_index`: Tracks which email in the `inbox` is currently being processed.
 *   `processed_email_ids`: Stores IDs of emails that have completed processing in the current run.
 *   `current_email`: The specific `EmailObject` being analyzed by the agent at any given time.
@@ -84,7 +84,7 @@ class RefinedEmailAgentState(TypedDict):
 
 #### 3.2. Email Fetching Layer
 
-This layer is responsible for securely connecting to email providers and retrieving raw email data, which is then parsed into a standardized `EmailObject` format.
+This layer is responsible for securely connecting to email providers and retrieving raw email data, which is then parsed into a standardized `Email` format.
 
 ##### 3.2.1. `BaseEmailFetcher` (Abstract Base Class)
 
