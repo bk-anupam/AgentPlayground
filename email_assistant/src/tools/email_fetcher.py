@@ -16,7 +16,7 @@ from googleapiclient.errors import HttpError
 from google.cloud import secretmanager
 from google.api_core import exceptions as google_exceptions
 
-from email_assistant.src.state import EmailObject, RefinedEmailAgentState
+from email_assistant.src.agent.state import EmailObject, EmailAgentState
 from email_assistant.src.logger import logger
 
 # --- Abstract Base Class ---

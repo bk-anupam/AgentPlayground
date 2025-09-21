@@ -7,7 +7,7 @@ import requests
 import google.auth
 from google.cloud import secretmanager
 from google.api_core import exceptions as google_exceptions
-from email_assistant.src.state import EmailObject
+from email_assistant.src.agent.state import EmailObject
 from email_assistant.src.logger import logger
 from email_assistant.src.tools.email_fetcher import BaseEmailFetcher
 

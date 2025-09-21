@@ -24,18 +24,22 @@ class EmailAgentState(TypedDict):
     accumulating data as the agent processes emails.
     """
     # --- Batch Processing State ---
-    inbox: List[Email]            # The list of emails fetched for this run
-    current_email_index: int            # The index of the email currently being processed
-    processed_email_ids: List[str]      # IDs of emails successfully processed in this run
+    # The list of emails fetched for this run
+    inbox: List[Email]
+    # The index of the email currently being processed            
+    current_email_index: int            
+    # IDs of emails successfully processed in this run
+    processed_email_ids: List[str]      
 
     # --- Per-Email Processing State (cleared for each new email) ---
-    current_email: Optional[Email] # The email object currently under analysis
+    # The email object currently under analysis
+    current_email: Optional[Email] 
     classification: Optional[Literal["priority", "meeting", "task", "invoice", "newsletter", "spam", "other"]]
     summary: Optional[str]
-    extracted_data: Optional[Dict[str, Any]]      # For invoices, contact info, etc.
+    # For invoices, contact info, etc.
+    extracted_data: Optional[Dict[str, Any]]      
 
     # --- Core Reasoning State ---
-    messages: Annotated[Sequence[BaseMessage], "The conversation history for the current email"]
-
-    # --- Configuration ---
-    user_preferences: UserPreferences   # User-defined rules and settings
+    messages: Annotated[Sequence[BaseMessage], "The conversation history for the current email"]    
+    # User-defined rules and settings
+    user_preferences: UserPreferences   

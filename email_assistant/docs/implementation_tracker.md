@@ -15,28 +15,28 @@
 ## Phase 1: Core Infrastructure Setup
 
 ### 1.1 LangGraph Workflow Foundation (in `src/agent/graph.py`)
-- [ ] ⏳ Basic graph structure with nodes and edges (Implements Design Doc 4.0)
+- [x] ✅ Basic graph structure with nodes and edges (Implements Design Doc 4.0)
   - Create main `StatefulGraph` with `EmailAgentState`.
   - Define entry point and basic flow.
   - Set up conditional routing logic.
   - **Acceptance Criteria:** The graph compiles successfully.
 
-- [ ] ⏳ Batch processing loop implementation
+- [x] ✅ Batch processing loop implementation
   - `fetch_emails` → `select_next_email` → `classify_email` loop.
   - `has_emails_to_process?` conditional edge.
   - State management for `current_email_index`.
 
-- [ ] ⏳ Email routing logic
+- [x] ✅ Email routing logic
   - `classify_email` → specialized planner routing.
   - Conditional edges based on `state['classification']`.
 
-- [ ] ⏳ State management setup
+- [x] ✅ State management setup
   - Initialize `EmailAgentState` with user preferences.
   - Clear per-email fields between iterations.
   - Processed email tracking.
 
 ### 1.2 Initial Node Implementations (in `src/nodes.py`)
-- [ ] ⏳ `fetch_emails_node` integration
+- [x] ✅ `fetch_emails_node` integration
   - Integrate with existing `GmailFetcher`/`OutlookFetcher`.
   - Populate `state['inbox']` with fetched emails.
   - Handle authentication and error cases.
@@ -44,19 +44,19 @@
   - **Acceptance Criteria:** Node populates `state['inbox']` and initializes `state['current_email_index']`.
   - **Test Command:** `python src/test_fetcher.py gmail`
 
-- [ ] ⏳ `select_next_email_node`
+- [x] ✅ `select_next_email_node`
   - Increment `current_email_index`.
   - Set `state['current_email']` to the next email.
   - Clear previous per-email state fields (`classification`, `summary`, etc.).
   - **Acceptance Criteria:** `state['current_email']` is correctly set and previous state is cleared.
 
-- [ ] ⏳ `classify_email_node`
+- [x] ✅ `classify_email_node`
   - LLM integration for email categorization.
   - Classify into: `priority`, `meeting`, `task`, `invoice`, `newsletter`, `spam`, `other`.
   - Update `state['classification']`.
   - **Acceptance Criteria:** `state['classification']` is updated with a valid category. LLM API errors are logged.
 
-- [ ] ⏳ Basic LLM integration setup in **`src/llm.py`**
+- [x] ✅ Basic LLM integration setup in **`src/llm.py`**
   - Configure Gemini LLM client.
   - Set up message history management.
   - Handle API authentication and rate limiting.
