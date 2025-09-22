@@ -165,12 +165,30 @@ graph TD
 
     L --> B;
 ```
+Here's a breakdown based on the design:
+
+   1. **Classifier as a Router:** The classify_email node acts as a "router" agent. Its sole responsibility is to perform an initial assessment and delegate the email to the correct specialist.
+
+   2. **Specialized Sub-Agents (Planners):** The different planners (meeting_planner, task_planner, invoice_planner, etc.) are designed to be "specialized sub-agents."
+       * Focused Expertise: Each planner is the entry point to a sub-graph that is an expert in one domain. For example, the meeting_planner is primed with context and tools specifically for
+         scheduling, while the invoice_planner is focused on data extraction and financial workflows.
+       * Tailored Prompts: As the design document notes, these planners will prompt the LLM with context-specific instructions (e.g., "You are a meeting scheduler..."). This is a classic way
+         to invoke a specialized agent.
+       * Dedicated Tools: While not explicitly stated as a constraint, it's implied that each sub-agent would primarily use a toolset relevant to its specialty (e.g., calendar tools for the
+         meeting agent, task management tools for the task agent).
+
+  This is a powerful and common pattern in agentic design. Instead of one monolithic agent trying to do everything, you have a router that passes tasks to specialized agents who can
+  perform their function more efficiently and reliably.
+
 
 #### 4.1. Nodes (The "Doers")
 
-*   **`fetch_emails`**: (Already described) Entry point, fetches a batch of emails.
-*   **`select_next_email`**: Increments `current_email_index` and sets `state['current_email']` to the next email in the `inbox`.
-*   **`classify_email`**:
+*   **`fetch_emails_node`**: (Already described) Entry point, fetches a batch of emails.
+*   **`select_next_email_node`**:
+    *   **Purpose:** Moves to the next email in the `inbox`.
+    *   **Action:** Increments `current_email_index` and sets `state['current_email']` to the next email in the `inbox`.
+    *   **State Update:** Clears per-email specific fields (`classification`, `summary`, `extracted_data`, `messages`).        
+*   **`classify_email_node`**:
     *   **Purpose:** Initial triage and categorization of the `current_email`.
     *   **Action:** Calls an LLM with the email's subject and body to determine its type (e.g., "priority", "meeting", "task", "invoice", "newsletter", "spam", "other").
     *   **State Update:** Populates `state['classification']`.
