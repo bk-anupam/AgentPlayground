@@ -1,7 +1,15 @@
-from langgraph.graph import StatefulGraph, END
-from src.agent.state import EmailAgentState
-from src.logger import logger
-from src.agent.nodes import fetch_emails, select_next_email, update_run_state, classify_email_node
+from langgraph.graph import StateGraph, END
+from functools import partial
+from email_assistant.src.agent.state import EmailAgentState
+from email_assistant.src.logger import logger
+from email_assistant.src.agent.nodes import (
+    fetch_emails_node, 
+    select_next_email_node, 
+    update_run_state_node, 
+    classify_email_node,
+    simple_triage_node
+)
+from email_assistant.src.tools.email_fetcher import BaseEmailFetcher
 
 
 def meeting_planner(state: EmailAgentState) -> EmailAgentState:
@@ -14,10 +22,6 @@ def task_planner(state: EmailAgentState) -> EmailAgentState:
 
 def general_planner(state: EmailAgentState) -> EmailAgentState:
     logger.info("---NODE: ROUTED TO GENERAL PLANNER---")
-    return state
-
-def simple_triage(state: EmailAgentState) -> EmailAgentState:
-    logger.info("---NODE: ROUTED TO SIMPLE TRIAGE---")
     return state
 
 # Conditional Edge Functions
@@ -49,19 +53,22 @@ def route_after_classification(state: EmailAgentState) -> str:
         return "general_planner"
 
 # Graph Definition
-def build_agent_workflow_graph() -> StatefulGraph:
-    """Builds and compiles the LangGraph for the email agent."""
-    workflow = StatefulGraph(EmailAgentState)
+def build_agent_workflow_graph(email_fetcher: BaseEmailFetcher = None) -> StateGraph:
+    """
+    Builds and compiles the LangGraph for the email agent.
+    """
+    workflow = StateGraph(EmailAgentState)
 
+    fetch_emails_node_runnable = partial(fetch_emails_node, email_fetcher=email_fetcher)
     # Add nodes
-    workflow.add_node("fetch_emails", fetch_emails)
-    workflow.add_node("select_next_email", select_next_email)
+    workflow.add_node("fetch_emails", fetch_emails_node_runnable)
+    workflow.add_node("select_next_email", select_next_email_node)
     workflow.add_node("classify_email", classify_email_node)
     workflow.add_node("meeting_planner", meeting_planner)
     workflow.add_node("task_planner", task_planner)
     workflow.add_node("general_planner", general_planner)
-    workflow.add_node("simple_triage", simple_triage)
-    workflow.add_node("update_run_state", update_run_state)
+    workflow.add_node("simple_triage", simple_triage_node)
+    workflow.add_node("update_run_state", update_run_state_node)
 
     # Set the entry point
     workflow.set_entry_point("fetch_emails")

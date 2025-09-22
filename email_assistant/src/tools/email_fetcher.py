@@ -3,10 +3,7 @@ import json
 import os
 import re
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, Tuple
-import msal
-import requests
-
+from typing import List, Dict, Any, Optional
 import google.auth
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -15,14 +12,15 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google.cloud import secretmanager
 from google.api_core import exceptions as google_exceptions
-
-from email_assistant.src.agent.state import EmailObject, EmailAgentState
+from email_assistant.src.agent.state import Email
 from email_assistant.src.logger import logger
 
 # --- Abstract Base Class ---
 
 class BaseEmailFetcher(ABC):
     """Abstract base class for fetching emails from a provider."""
+    def __init__(self):
+        self.service: Any = None
 
     @abstractmethod
     def connect(self) -> Any:
@@ -35,17 +33,18 @@ class BaseEmailFetcher(ABC):
         pass
 
     @abstractmethod
-    def parse_email(self, raw_email: Dict[str, Any]) -> Optional[EmailObject]:
+    def parse_email(self, raw_email: Dict[str, Any]) -> Optional[Email]:
         """Parse a raw email message into a structured EmailObject."""
         pass
 
-    def get_emails(self, max_count: int = 10) -> List[EmailObject]:
+    def get_emails(self, max_count: int = 10) -> List[Email]:
         """High-level method to connect, fetch, and parse emails."""
         logger.info(f"Starting email fetch process for max {max_count} emails.")
-        service = self.connect()
-        if not service:
+        self.service = self.connect()
+        if not self.service:
+            logger.error("Failed to connect to the email service.")
             return []
-        raw_emails = self.fetch_raw_unread_emails(service, max_count)
+        raw_emails = self.fetch_raw_unread_emails(self.service, max_count)
         parsed_emails = [self.parse_email(email) for email in raw_emails if email]
         # Filter out any None results from parsing failures
         valid_emails = [email for email in parsed_emails if email]
@@ -159,7 +158,7 @@ class GmailFetcher(BaseEmailFetcher):
             return []
 
 
-    def parse_email(self, raw_email: Dict[str, Any]) -> Optional[EmailObject]:
+    def parse_email(self, raw_email: Dict[str, Any]) -> Optional[Email]:
         """Parses the complex Gmail API message object."""
         try:
             headers = raw_email["payload"]["headers"]
@@ -185,7 +184,7 @@ class GmailFetcher(BaseEmailFetcher):
             if match:
                 sender = match.group(1)
 
-            return EmailObject(
+            return Email(
                 id=email_id,
                 sender=sender.strip(),
                 subject=subject.strip(),

@@ -1,8 +1,10 @@
-from email_assistant.src.tools.email_fetcher import BaseEmailFetcher
+from email_assistant.src.tools.email_fetcher import BaseEmailFetcher, GmailFetcher
+from email_assistant.src.tools.outlook_fetcher import OutlookFetcher
 from email_assistant.src.agent.state import EmailAgentState, UserPreferences
 from email_assistant.src.logger import logger
 from email_assistant.src.config import config
 from email_assistant.src.llm_factory import llm
+from email_assistant.src.agent.email_actions import GmailActions, OutlookActions
 
 def load_user_preferences() -> UserPreferences:
     """Load user preferences with default values. This can be extended to load from config files or database."""
@@ -10,20 +12,20 @@ def load_user_preferences() -> UserPreferences:
         # Empty list - can be populated from config
         priority_senders=[],  
         # Empty dict - can be populated with rules
-        auto_archive_rules={},  
+        auto_archive_rules={},
         # Default critical actions
-        approval_required_for=["send_email", "create_event", "create_task"]  
+        approval_required_for=["send_email", "create_event", "create_task"]
     )
 
 
 # Node Functions
-def fetch_emails(
+def fetch_emails_node(
         state: EmailAgentState,
         email_fetcher: BaseEmailFetcher = None
 ) -> EmailAgentState:
-    """Fetches unread emails using the OutlookFetcher and initializes the state."""
+    """Fetches unread emails and initializes the appropriate action client in the state."""
     logger.info("---NODE: FETCHING EMAILS---")
-    logger.info(f"Connecting to Outlook and fetching up to {config.max_emails_to_fetch} unread emails...")
+    logger.info(f"Connecting and fetching up to {config.max_emails_to_fetch} unread emails...")
 
     # Initialize user preferences if not already set
     if 'user_preferences' not in state or state['user_preferences'] is None:
@@ -32,20 +34,31 @@ def fetch_emails(
 
     try:
         fetched_emails = email_fetcher.get_emails(max_count=config.max_emails_to_fetch)
+        
+        # Initialize the appropriate provider-specific action client
+        if isinstance(email_fetcher, GmailFetcher):
+            state['email_actions_client'] = GmailActions(service=email_fetcher.service)
+            logger.info("Initialized GmailActions client in state.")
+        elif isinstance(email_fetcher, OutlookFetcher):
+            state['email_actions_client'] = OutlookActions(client=email_fetcher.service)
+            logger.info("Initialized OutlookActions client in state.")
+        else:
+            state['email_actions_client'] = None
+            logger.warning("No email actions client initialized for the current fetcher type.")
+
     except Exception as e:
-        logger.error("Failed to fetch emails: %s", e)
+        logger.error("Failed to fetch emails or initialize action client: %s", e)
         fetched_emails = []
+        state['email_actions_client'] = None
 
     # Update the state
     state['inbox'] = fetched_emails
     state['current_email_index'] = 0
-    # Reset for the new batch
-    state['processed_email_ids'] = [] 
     logger.info(f"Fetched {len(fetched_emails)} emails.")
     return state
 
 
-def select_next_email(state: EmailAgentState) -> EmailAgentState:
+def select_next_email_node(state: EmailAgentState) -> EmailAgentState:
     """Selects the next email from the inbox and prepares the state for processing."""
     logger.info("---NODE: SELECTING NEXT EMAIL---")
     current_index = state.get('current_email_index', 0)
@@ -66,7 +79,7 @@ def select_next_email(state: EmailAgentState) -> EmailAgentState:
     return state
 
 
-def update_run_state(state: EmailAgentState) -> EmailAgentState:
+def update_run_state_node(state: EmailAgentState) -> EmailAgentState:
     """Updates the run state after processing an email - clears per-email fields and tracks processed emails."""
     logger.info("---NODE: UPDATING RUN STATE---")
 
@@ -94,7 +107,6 @@ def update_run_state(state: EmailAgentState) -> EmailAgentState:
 def classify_email_node(state: EmailAgentState) -> EmailAgentState:
     """Classifies the current email using LLM integration."""
     logger.info("---NODE: CLASSIFYING EMAIL---")
-
     current_email = state.get('current_email')
     if not current_email:
         logger.warning("No current email to classify")
@@ -116,17 +128,40 @@ def classify_email_node(state: EmailAgentState) -> EmailAgentState:
     try:
         response = llm.invoke(prompt)
         classification = response.content.strip().lower()
-
         valid_categories = {"priority", "meeting", "task", "invoice", "newsletter", "spam", "other"}
         if classification not in valid_categories:
             logger.warning(f"Invalid classification '{classification}' from LLM, defaulting to 'other'")
             classification = "other"
-
         state['classification'] = classification
         logger.info(f"Email classified as: {classification}")
-
     except Exception as e:
         logger.error(f"Failed to classify email: {e}")
-        state['classification'] = "other"  # Default classification on error
+        state['classification'] = "other"
 
     return state
+
+
+def simple_triage_node(state: EmailAgentState) -> dict:
+    """Handles simple triage cases by calling the appropriate action client method."""
+    classification = state.get("classification")
+    current_email = state.get("current_email")
+    email_actions_client = state.get("email_actions_client")
+    email_id = current_email["id"]
+    
+    logger.info(f"---NODE: PERFORMING SIMPLE TRIAGE for email {email_id} with classification: {classification} ---")
+
+    if not email_actions_client:
+        logger.error("No email actions client found in state. Cannot perform email actions.")
+        return {}
+
+    if classification == "spam":
+        email_actions_client.mark_as_spam(email_id=email_id)
+        
+    elif classification == "newsletter":
+        # Placeholder for calling the tool to move or label the email
+        # e.g., email_tools.move_email_to_folder(email_id, "Newsletters")
+        logger.info(f"Action: Archiving newsletter {email_id}.")
+
+    # This node performs a side-effect and doesn't need to modify the state.
+    # The subsequent `update_run_state` node will handle state cleanup.
+    return {}

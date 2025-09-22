@@ -7,7 +7,7 @@ import requests
 import google.auth
 from google.cloud import secretmanager
 from google.api_core import exceptions as google_exceptions
-from email_assistant.src.agent.state import EmailObject
+from email_assistant.src.agent.state import Email
 from email_assistant.src.logger import logger
 from email_assistant.src.tools.email_fetcher import BaseEmailFetcher
 
@@ -110,7 +110,7 @@ class OutlookFetcher(BaseEmailFetcher):
         self._save_cache()
 
         if "access_token" in result:
-            logger.info("Successfully acquired MS Graph access token.")
+            logger.info("Successfully acquired MS Graph access token to connect to Outlook.")
             session = requests.Session()
             session.headers.update({"Authorization": f"Bearer {result['access_token']}"})
             return session
@@ -120,7 +120,9 @@ class OutlookFetcher(BaseEmailFetcher):
 
 
     def fetch_raw_unread_emails(self, service: requests.Session, max_count: int = 10) -> List[Dict[str, Any]]:
-        """Fetches unread emails using the Microsoft Graph API."""
+        """
+        Fetches unread emails using the Microsoft Graph API.
+        """
         query_params = {
             "$filter": "isRead eq false",
             "$top": max_count,
@@ -133,14 +135,15 @@ class OutlookFetcher(BaseEmailFetcher):
             messages = response.json().get("value", [])
             if not messages:
                 logger.info("No unread Outlook messages found.")
+            logger.info(f"Fetched {len(messages)} unread Outlook messages.")    
             return messages
         except requests.exceptions.RequestException as e:
             logger.error(f"An error occurred fetching Outlook emails: {e}")
             return []
 
 
-    def parse_email(self, raw_email: Dict[str, Any]) -> Optional[EmailObject]:
-        """Parses a raw email message from MS Graph API into a structured EmailObject."""
+    def parse_email(self, raw_email: Dict[str, Any]) -> Optional[Email]:
+        """Parses a raw email message from MS Graph API into a structured Email."""
         try:
             sender_info = raw_email.get("from", {}).get("emailAddress", {})
             sender_email = sender_info.get("address", "N/A")
@@ -152,7 +155,7 @@ class OutlookFetcher(BaseEmailFetcher):
                 # Basic HTML tag stripping
                 body = re.sub('<[^<]+?>', '', body)
 
-            return EmailObject(
+            return Email(
                 id=raw_email.get("id", "N/A"),
                 sender=sender_email.strip(),
                 subject=raw_email.get("subject", "").strip(),
