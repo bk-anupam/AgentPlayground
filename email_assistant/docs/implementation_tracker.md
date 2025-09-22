@@ -62,6 +62,12 @@
   - Handle API authentication and rate limiting.
   - **Acceptance Criteria:** A configured Gemini client can be imported and used by other modules.
 
+- [x] ✅ `simple_triage_node`
+  - Handle simple cases like 'spam' or 'newsletter'.
+  - Directly call actions like `mark_as_spam`.
+  - Bypass the complex reasoning loop for efficiency.
+  - **Acceptance Criteria:** Correctly archives or deletes emails based on classification.
+
 ---
 
 ## Phase 2: Reasoning Loop Core (Nodes in `src/nodes.py`)
@@ -105,32 +111,18 @@
   - Fallback for priority/other email types
   - Generic email processing logic
   - Flexible tool selection
-- [ ] ⏳ simple_triage_tool
-  - Handle spam/newsletter emails
-  - Basic categorization and archiving
-  - Bypass complex reasoning for simple cases
 
 ---
 
 ## Phase 3: Tool Integration
 
-### 3.1 Email Management Tools
-- [ ] ⏳ send_email_tool
-  - Compose and send email responses
-  - Handle reply vs. new email logic
-  - Integration with Gmail/Outlook APIs
-- [ ] ⏳ update_email_labels_tool
-  - Apply labels/categories to emails
-  - Mark as read/unread
-  - Custom label management
-- [ ] ⏳ move_email_to_folder_tool
-  - Move emails between folders
-  - Archive functionality
-  - Folder organization
-- [ ] ⏳ mark_as_spam_tool
-  - Spam detection and reporting
-  - Move to spam folder
-  - Unsubscribe handling
+### 3.1 Email Action Clients (in `src/agent/email_actions.py`)
+- [x] ✅ `BaseEmailActions` Abstract Base Class
+  - Defines a common interface for all provider-specific action clients (e.g., `mark_as_spam`, `send_email`).
+- [x] ✅ `GmailActions` and `OutlookActions`
+  - Concrete implementations of `BaseEmailActions`.
+  - These clients are used by nodes to perform actions, they are not tools for the LLM.
+  - Actions include: `mark_as_spam`, `move_email`, etc.
 
 ### 3.2 External Service Tools
 - [ ] ⏳ Calendar integration (Google/Outlook)

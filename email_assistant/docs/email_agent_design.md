@@ -144,7 +144,7 @@ graph TD
         D -- "task" --> F[task_planner];
         D -- "invoice" --> G[invoice_planner];
         D -- "other/priority" --> H[general_planner];
-        D -- "spam/newsletter" --> T[simple_triage_tool];
+        D -- "spam/newsletter" --> T[simple_triage_node];
         T --> L[update_run_state];
     end
 
@@ -192,7 +192,7 @@ Here's a breakdown based on the design:
     *   **Purpose:** Initial triage and categorization of the `current_email`.
     *   **Action:** Calls an LLM with the email's subject and body to determine its type (e.g., "priority", "meeting", "task", "invoice", "newsletter", "spam", "other").
     *   **State Update:** Populates `state['classification']`.
-*   **`simple_triage_tool`**: A dedicated node for straightforward actions like marking as spam or moving newsletters to a specific folder. This bypasses the complex reasoning loop for simple cases.
+*   **`simple_triage_node`**: A dedicated node for straightforward actions like marking as spam or moving newsletters to a specific folder. This bypasses the complex reasoning loop for simple cases by directly using an `EmailActions` client.
 *   **`meeting_planner` / `task_planner` / `invoice_planner` / `general_planner`**:
     *   **Purpose:** Specialized entry points into the core reasoning loop, tailored to specific email types.
     *   **Action:** These nodes (or the `plan_step` they lead to) will prompt the LLM with context-specific instructions (e.g., "You are a meeting scheduler...") and the `current_email` data.
@@ -233,9 +233,9 @@ Here's a breakdown based on the design:
 
 ### 5. Tool Integration Layer
 
-The agent will interact with external services through a set of well-defined tools.
+The agent will interact with external services through a set of well-defined tools and action clients.
 
-*   **Email Tools:**
+*   **Email Action Clients (`BaseEmailActions`):** Instead of individual LLM-callable tools for every email action, the design uses provider-specific "action clients" (`GmailActions`, `OutlookActions`). These clients implement a common interface with methods for all required email operations. Nodes can then call these methods directly. The core capabilities to be implemented in these clients are:
     *   `send_email`: To compose and send replies/new emails.
     *   `update_email_labels`: To categorize and organize emails (e.g., mark as read, archive).
     *   `move_email_to_folder`: To move emails to specific folders.

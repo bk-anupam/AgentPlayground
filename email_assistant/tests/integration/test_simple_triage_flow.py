@@ -56,7 +56,7 @@ class TestSimpleTriageFlow(unittest.TestCase):
         mock_mark_as_spam.assert_called_once()
         # Verify it was called with the correct email ID
         called_args, called_kwargs = mock_mark_as_spam.call_args
-        self.assertEqual(called_kwargs.get('email_id'), 'test-spam-email-123')
+        self.assertEqual(called_kwargs.get('email_id'), test_email['id'])
 
         # Verify the final state of the graph
         self.assertIn('test-spam-email-123', final_state['processed_email_ids'])
