@@ -1,5 +1,6 @@
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
+import requests
 from functools import partial
 from email_assistant.src.agent.state import EmailAgentState
 from email_assistant.src.logger import logger
@@ -100,12 +101,30 @@ def should_continue(state: EmailAgentState) -> str:
     return "end_of_email"
 
 
+def custom_tool_error_handler(e: Exception) -> str:
+    """
+    Generate a more informative error message for the LLM based on the exception type.
+    """
+    if isinstance(e, requests.exceptions.HTTPError):
+        if e.response.status_code == 403:
+            return (
+                "Tool execution failed with a permission error (403 Forbidden). "
+                "This is an external issue with the tool's permissions and cannot be fixed by retrying. "
+                "Inform the user that the action could not be completed due to a permissions problem and stop."
+            )
+        elif e.response.status_code == 400:
+            return f"Tool execution failed with a bad request (400). The API reported: {e.response.text}. Please check and correct the tool's input parameters."
+    # For other errors, provide a general but informative message
+    return (
+        f"Tool execution failed with an unexpected error: {repr(e)}. "
+        "Do not retry the tool. Inform the user about the failure and stop."
+    )
+
 def build_agent_workflow_graph(email_fetcher: BaseEmailFetcher = None) -> StateGraph:
     """
     Builds and compiles the LangGraph workflow for the email agent.
     """
     workflow = StateGraph(EmailAgentState)
-    # instantiate nodes with partial dependencies
     fetch_emails_node_runnable = partial(fetch_emails_node, email_fetcher=email_fetcher)
     
     # Define tools
@@ -124,7 +143,10 @@ def build_agent_workflow_graph(email_fetcher: BaseEmailFetcher = None) -> StateG
     workflow.add_node("general_planner", general_planner)
     # Core reasoning nodes
     workflow.add_node("plan_step", plan_step_node)
-    workflow.add_node("execute_tools", ToolNode(tools))
+    # The ToolNode is now wrapped in a function that gets tools dynamically from the state
+    # This ensures the execution node and planning node are always in sync.
+    dynamic_tool_node = ToolNode(tools=tools, handle_tool_errors=custom_tool_error_handler)
+    workflow.add_node("execute_tools", dynamic_tool_node)
     # Set the entry point
     workflow.set_entry_point("fetch_emails")
     # Core Graph Edges
