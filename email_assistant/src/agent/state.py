@@ -1,5 +1,6 @@
 from typing import TypedDict, List, Annotated, Sequence, Literal, Dict, Any, Optional
 from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
 from email_assistant.src.data_models import Email, UserPreferences
 from email_assistant.src.tools.email_fetcher import BaseEmailFetcher
 from email_assistant.src.agent.email_actions import BaseEmailActions
@@ -30,7 +31,7 @@ class EmailAgentState(TypedDict):
     extracted_data: Optional[Dict[str, Any]]      
 
     # --- Core Reasoning State ---
-    messages: Annotated[Sequence[BaseMessage], "The conversation history for the current email"]
+    messages: Annotated[Sequence[BaseMessage], add_messages]
 
     # --- Configuration & Services ---
     user_preferences: UserPreferences

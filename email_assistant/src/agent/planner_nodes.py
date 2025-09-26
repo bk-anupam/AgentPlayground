@@ -6,7 +6,7 @@ from datetime import datetime
 
 # --- Specialist Planner Nodes ---
 
-def meeting_planner(state: EmailAgentState) -> EmailAgentState:
+def meeting_planner(state: EmailAgentState) -> dict:
     """
     Planner node for meeting-related emails.
     """
@@ -14,7 +14,7 @@ def meeting_planner(state: EmailAgentState) -> EmailAgentState:
     current_email = state.get('current_email')
     if not current_email:
         logger.warning("Meeting planner called without a current email in state.")
-        return state
+        return {}
 
     # The SystemMessage defines the agent's role and tools.
     system_prompt_template = prompt_manager.get_prompt("CALENDAR_EVENT_SYSTEM_PROMPT")
@@ -32,18 +32,17 @@ def meeting_planner(state: EmailAgentState) -> EmailAgentState:
     human_message = HumanMessage(content=human_message_content)
 
     # The planner's job is to prepare the initial messages for the reasoning loop.
-    state['messages'] = [system_message, human_message]
-    return state
+    return {"messages": [system_message, human_message]}
 
 
-def task_planner(state: EmailAgentState) -> EmailAgentState:
+def task_planner(state: EmailAgentState) -> dict:
     """Planner node for task-related emails."""
     logger.info("---NODE: TASK PLANNER---")
     
     current_email = state.get('current_email')
     if not current_email:
         logger.warning("Task planner called without a current email in state.")
-        return state
+        return {}
 
     system_prompt_template = prompt_manager.get_prompt("TASK_PLANNER_SYSTEM_PROMPT")
     system_message = SystemMessage(content=system_prompt_template.format())
@@ -56,17 +55,17 @@ def task_planner(state: EmailAgentState) -> EmailAgentState:
     )
     human_message = HumanMessage(content=human_message_content)
 
-    state['messages'] = [system_message, human_message]
-    return state
+    return {"messages": [system_message, human_message]}
 
-def invoice_planner(state: EmailAgentState) -> EmailAgentState:
+
+def invoice_planner(state: EmailAgentState) -> dict:
     """Planner node for invoice-related emails."""
     logger.info("---NODE: INVOICE PLANNER---")
     
     current_email = state.get('current_email')
     if not current_email:
         logger.warning("Invoice planner called without a current email in state.")
-        return state
+        return {}
 
     system_prompt_template = prompt_manager.get_prompt("INVOICE_PLANNER_SYSTEM_PROMPT")
     system_message = SystemMessage(content=system_prompt_template.format())
@@ -79,17 +78,17 @@ def invoice_planner(state: EmailAgentState) -> EmailAgentState:
     )
     human_message = HumanMessage(content=human_message_content)
 
-    state['messages'] = [system_message, human_message]
-    return state
+    return {"messages": [system_message, human_message]}
 
-def general_planner(state: EmailAgentState) -> EmailAgentState:
+
+def general_planner(state: EmailAgentState) -> dict:
     """A general-purpose planner for other email types."""
     logger.info("---NODE: GENERAL PLANNER---")
     
     current_email = state.get('current_email')
     if not current_email:
         logger.warning("General planner called without a current email in state.")
-        return state
+        return {}
 
     system_prompt_template = prompt_manager.get_prompt("GENERAL_PLANNER_SYSTEM_PROMPT")
     system_message = SystemMessage(content=system_prompt_template.format())
@@ -102,5 +101,4 @@ def general_planner(state: EmailAgentState) -> EmailAgentState:
     )
     human_message = HumanMessage(content=human_message_content)
 
-    state['messages'] = [system_message, human_message]
-    return state
+    return {"messages": [system_message, human_message]}
