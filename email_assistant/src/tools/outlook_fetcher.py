@@ -15,7 +15,7 @@ from email_assistant.src.tools.email_fetcher import BaseEmailFetcher
 class OutlookFetcher(BaseEmailFetcher):
     """A concrete implementation for fetching emails from Microsoft Outlook."""
 
-    SCOPES = ["https://graph.microsoft.com/Mail.Read"]
+    SCOPES = ["https://graph.microsoft.com/Mail.Read"] # , "Calendars.ReadWrite", "Calendars.Read.Shared", "Calendars.ReadWrite.Shared"]
     CREDENTIALS_SECRET_ID = "outlook_credentials"
     TOKEN_SECRET_ID = "outlook-token-cache"
     GRAPH_API_ENDPOINT = "https://graph.microsoft.com/v1.0"
@@ -24,8 +24,8 @@ class OutlookFetcher(BaseEmailFetcher):
         self.sm_client = secretmanager.SecretManagerServiceClient()
         self.project_id = self._get_project_id()
         self.token_cache = msal.SerializableTokenCache()
-        self.app = None
-
+        self.app: Optional[msal.PublicClientApplication] = None
+        self.account: Optional[Dict[str, Any]] = None
 
     def _get_project_id(self) -> Optional[str]:
         try:
@@ -54,15 +54,21 @@ class OutlookFetcher(BaseEmailFetcher):
             return
         try:
             payload = self.token_cache.serialize().encode("UTF-8")
-            parent = self.sm_client.secret_path(self.project_id, self.TOKEN_SECRET_ID)
-            # Ensure the secret exists before adding a version
+            parent = self.sm_client.secret_path(self.project_id, self.TOKEN_SECRET_ID)            
             try:
-                self.sm_client.get_secret(request={"name": parent})
+                # Try to add a new version directly
+                self.sm_client.add_secret_version(request={"parent": parent, "payload": {"data": payload}})
             except google_exceptions.NotFound:
+                # If the secret itself doesn't exist, create it and then add the version.
+                logger.info(f"Secret '{self.TOKEN_SECRET_ID}' not found. Creating it now.")
                 self.sm_client.create_secret(
-                    request={"parent": f"projects/{self.project_id}", "secret_id": self.TOKEN_SECRET_ID, "secret": {"replication": {"automatic": {}}}}
+                    parent=f"projects/{self.project_id}",
+                    secret_id=self.TOKEN_SECRET_ID,
+                    secret={
+                        "replication": {"automatic": {}}
+                    }
                 )
-            self.sm_client.add_secret_version(request={"parent": parent, "payload": {"data": payload}})
+                self.sm_client.add_secret_version(request={"parent": parent, "payload": {"data": payload}})
             logger.info(f"Successfully saved token cache to Secret Manager '{self.TOKEN_SECRET_ID}'.")
         except Exception as e:
             logger.error(f"Failed to save token cache to Secret Manager: {e}")
@@ -81,7 +87,12 @@ class OutlookFetcher(BaseEmailFetcher):
             # Use the 'common' authority to allow both personal (Outlook.com) and work/school accounts.
             # This is more flexible for a public client application and resolves the authority validation error.
             authority = "https://login.microsoftonline.com/common"
-            self.app = msal.PublicClientApplication(ms_creds['client_id'], authority=authority, token_cache=self.token_cache)
+            self.app = msal.PublicClientApplication(
+                ms_creds['client_id'], 
+                authority=authority, 
+                token_cache=self.token_cache,
+                client_capabilities=["CP1"] # This capability is required to signal device code flow support
+            )
         except google_exceptions.NotFound:
             logger.error(f"Secret '{self.CREDENTIALS_SECRET_ID}' not found. Please create it with your Azure App client_id.")
             return None
@@ -91,11 +102,13 @@ class OutlookFetcher(BaseEmailFetcher):
 
         self._load_cache()
         accounts = self.app.get_accounts()
-        result = None
-
         if accounts:
+            self.account = accounts[0]
+
+        result = None
+        if self.account:
             logger.info("Account found in cache. Attempting to acquire token silently.")
-            result = self.app.acquire_token_silent(self.SCOPES, account=accounts[0])
+            result = self.app.acquire_token_silent(self.SCOPES, account=self.account)
 
         if not result:
             logger.info("Silent token acquisition failed. Starting device flow authentication.")
@@ -105,7 +118,15 @@ class OutlookFetcher(BaseEmailFetcher):
                 return None
             
             print(flow["message"]) # Instruct user to authenticate
-            result = self.app.acquire_token_by_device_flow(flow)
+            # The acquire_token_by_device_flow method is blocking. It polls the token endpoint
+            # until authentication is complete or it times out. We increase the timeout
+            # to give ample time for browser interaction, especially with MFA like Windows Hello.
+            # The timeout is in seconds.
+            result = self.app.acquire_token_by_device_flow(flow, timeout=300)
+            # After successful device flow, get the account and store it
+            accounts = self.app.get_accounts()
+            if accounts:
+                self.account = accounts[0]
 
         self._save_cache()
 

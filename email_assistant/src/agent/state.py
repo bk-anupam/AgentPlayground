@@ -1,22 +1,9 @@
 from typing import TypedDict, List, Annotated, Sequence, Literal, Dict, Any, Optional
 from langchain_core.messages import BaseMessage
+from email_assistant.src.data_models import Email, UserPreferences
+from email_assistant.src.tools.email_fetcher import BaseEmailFetcher
 from email_assistant.src.agent.email_actions import BaseEmailActions
 
-
-class Email(TypedDict):
-    """A structured representation of a single email."""
-    id: str
-    sender: str
-    subject: str
-    body: str
-    received_at: str
-
-
-class UserPreferences(TypedDict):
-    """User-defined rules and settings for the agent."""
-    priority_senders: List[str]
-    auto_archive_rules: Dict[str, Any]
-    approval_required_for: List[str]  # e.g., ["send_email", "create_event"]
 
 
 class EmailAgentState(TypedDict):
@@ -30,7 +17,9 @@ class EmailAgentState(TypedDict):
     # The index of the email currently being processed            
     current_email_index: int            
     # IDs of emails successfully processed in this run
-    processed_email_ids: List[str]      
+    processed_email_ids: List[str]
+    # number of times fetch_emails_node has been run
+    fetch_emails_run_count: Optional[int]  
 
     # --- Per-Email Processing State (cleared for each new email) ---
     # The email object currently under analysis
@@ -47,3 +36,5 @@ class EmailAgentState(TypedDict):
     user_preferences: UserPreferences
     # The client for performing email actions (provider-agnostic)
     email_actions_client: Optional[BaseEmailActions] = None
+    # The email fetcher instance, needed for tool selection
+    email_fetcher: Optional[BaseEmailFetcher] = None

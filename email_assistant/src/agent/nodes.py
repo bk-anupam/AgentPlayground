@@ -5,6 +5,7 @@ from email_assistant.src.logger import logger
 from email_assistant.src.config import config
 from email_assistant.src.llm_factory import llm
 from email_assistant.src.agent.email_actions import GmailActions, OutlookActions
+from email_assistant.src.prompts.prompt_manager import prompt_manager
 
 def load_user_preferences() -> UserPreferences:
     """Load user preferences with default values. This can be extended to load from config files or database."""
@@ -23,14 +24,21 @@ def fetch_emails_node(
         state: EmailAgentState,
         email_fetcher: BaseEmailFetcher = None
 ) -> EmailAgentState:
-    """Fetches unread emails and initializes the appropriate action client in the state."""
-    logger.info("---NODE: FETCHING EMAILS---")
+    """Fetches unread emails, increments the fetch counter, and initializes the action client."""
+    # Increment fetch counter and log
+    fetch_count = state.get('fetch_emails_run_count', 0) + 1
+    state['fetch_emails_run_count'] = fetch_count
+    logger.info(f"---NODE: FETCHING EMAILS (Cycle {fetch_count}/{config.max_fetch_cycles})---")
+
     logger.info(f"Connecting and fetching up to {config.max_emails_to_fetch} unread emails...")
 
     # Initialize user preferences if not already set
     if 'user_preferences' not in state or state['user_preferences'] is None:
         state['user_preferences'] = load_user_preferences()
         logger.info("Initialized user preferences in agent state")
+
+    # Store the fetcher in the state so other nodes can access it
+    state['email_fetcher'] = email_fetcher
 
     try:
         fetched_emails = email_fetcher.get_emails(max_count=config.max_emails_to_fetch)
@@ -80,9 +88,10 @@ def select_next_email_node(state: EmailAgentState) -> EmailAgentState:
 
 
 def update_run_state_node(state: EmailAgentState) -> EmailAgentState:
-    """Updates the run state after processing an email - clears per-email fields and tracks processed emails."""
+    """
+    Updates the run state after processing an email - clears per-email fields and tracks processed emails.
+    """
     logger.info("---NODE: UPDATING RUN STATE---")
-
     # Add the current email ID to processed list if it exists
     current_email = state.get('current_email')
     if current_email and 'id' in current_email:
@@ -115,25 +124,34 @@ def classify_email_node(state: EmailAgentState) -> EmailAgentState:
 
     email_subject = current_email.get('subject', '')
     email_body = current_email.get('body', '')
-
-    prompt = f"""
-    Classify the following email into exactly one of these categories: priority, meeting, task, invoice, newsletter, spam, other.
-
-    Email Subject: {email_subject}
-    Email Body: {email_body}
-
-    Respond with only the category name, nothing else.
-    """
+    sender = current_email.get('sender', '')
 
     try:
+        # Get template and format it
+        classify_prompt_template = prompt_manager.get_prompt("CLASSIFY_EMAIL_PROMPT")
+        prompt = classify_prompt_template.format(
+            sender=sender,
+            email_subject=email_subject,
+            email_body=email_body
+        )
+        
+        # Invoke the LLM
         response = llm.invoke(prompt)
         classification = response.content.strip().lower()
+        
+        # More robust parsing to extract classification if model includes extra text
         valid_categories = {"priority", "meeting", "task", "invoice", "newsletter", "spam", "other"}
-        if classification not in valid_categories:
+        for category in valid_categories:
+            if category in classification:
+                classification = category
+                break
+        else:
             logger.warning(f"Invalid classification '{classification}' from LLM, defaulting to 'other'")
             classification = "other"
+            
         state['classification'] = classification
         logger.info(f"Email classified as: {classification}")
+
     except Exception as e:
         logger.error(f"Failed to classify email: {e}")
         state['classification'] = "other"

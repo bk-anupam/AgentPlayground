@@ -12,7 +12,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google.cloud import secretmanager
 from google.api_core import exceptions as google_exceptions
-from email_assistant.src.agent.state import Email
+from email_assistant.src.data_models import Email
 from email_assistant.src.logger import logger
 
 # --- Abstract Base Class ---

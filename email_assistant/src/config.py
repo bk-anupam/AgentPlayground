@@ -14,6 +14,7 @@ class Config:
         self.llm_model_name = os.getenv('LLM_MODEL_NAME', 'gemini-2.5-flash')
         self.temperature = float(os.getenv('TEMPERATURE', 0))        
         self.google_api_key = os.getenv('GOOGLE_API_KEY')
+        self.max_fetch_cycles = int(os.getenv('MAX_FETCH_CYCLES', 2))
         
 
 # Create a singleton instance of the Config class to be used throughout the application.
