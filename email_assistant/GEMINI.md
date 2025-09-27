@@ -1,69 +1,82 @@
 # Gemini Agent Context: Email Assistant Project
 
-This document provides essential context about the `email_assistant` project for the Gemini coding assistant.
+This document provides essential context about the `email_assistant` project for the Gemini coding assistant. Its purpose is to enable a coding assistant to quickly understand the project's design, architecture, and key components.
 
 ### 1. Project Overview
 
-The Email Management Agent is a system built with LangChain and LangGraph to intelligently triage, process, and manage incoming emails. Its goal is to automate routine tasks, extract key information, and facilitate timely responses, while keeping the user in control via a human-in-the-loop mechanism.
+The Email Management Agent is a system built with LangChain and LangGraph to intelligently triage, process, and manage incoming emails. Its goal is to automate routine tasks, extract key information, and facilitate timely responses, while keeping the user in control via robust human-in-the-loop mechanisms.
 
 ### 2. Core Technologies
 
 - **Orchestration:** LangChain & LangGraph
-- **Email Providers:** Gmail API, Microsoft Graph API
-- **Authentication:**
-    - Google: `google-auth-oauthlib`, `google-auth`
-    - Microsoft: `msal` (Microsoft Authentication Library)
-- **Security:** Google Secret Manager for storing all API credentials and tokens.
-- **Logging:** Standard Python `logging` module, configured in `src/logger.py`.
+- **LLM:** Google Gemini
+- **Email Providers:** Microsoft Graph API (primary), Gmail API
+- **Authentication:** `msal` (Microsoft) for device flow, `google-auth-oauthlib` (Google)
+- **Security:** Google Secret Manager for all API credentials and user tokens.
+- **Configuration:** `prompts.yaml` for prompts, managed by a `PromptManager`.
 
 ### 3. Architecture & Design Principles
 
-The agent's architecture is modular and event-driven, based on a state machine managed by LangGraph.
+The agent's architecture is a modular, event-driven state machine managed by LangGraph.
 
-- **Batch Processing:** The agent fetches and processes a batch of emails in a single execution cycle.
-- **Provider Agnostic Fetching:** An abstract base class, `BaseEmailFetcher`, defines a common interface for fetching emails. Concrete implementations like `GmailFetcher` and `OutlookFetcher` handle the specifics for each provider. This makes the system extensible.
-- **Specialized Routing:** Emails are classified (e.g., `meeting`, `task`, `invoice`) and routed to specialized sub-graphs for tailored processing.
-- **Cyclical Reasoning (ReAct Pattern):** For complex tasks, the agent uses a `plan -> execute -> observe` loop, allowing it to use tools iteratively and adjust its plan based on the results.
-- **Human-in-the-Loop:** Critical actions, such as sending an email or creating a calendar event, require explicit user approval before execution.
-- **Secure Credential Management:** All secrets (client IDs, tokens) are stored in Google Secret Manager, not in local files. The application fetches them at runtime.
+- **Specialized Planners:** After an initial classification, emails are routed to specialized sub-graphs (e.g., `meeting_planner`, `task_planner`). This is a core design pattern.
+- **Cyclical Reasoning (ReAct):** For complex tasks, the agent uses a `plan -> execute -> observe` loop, allowing it to use tools iteratively and adjust its plan based on results.
+- **Human-in-the-Loop (Dual Mechanism):**
+    - **Information Gathering:** The agent uses an `ask_user_for_input` tool to pause the workflow and ask the user for clarification when it lacks information to proceed. This treats the user as a queryable tool.
+    - **Action Approval:** A dedicated `human_review` node is planned for getting explicit user consent before executing critical actions like sending an email or deleting a calendar event.
+- **Provider-Agnostic Layers:** Abstract base classes like `BaseEmailFetcher` and `BaseEmailActions` define common interfaces, allowing for concrete implementations (`OutlookFetcher`, `GmailActions`) to be used interchangeably.
+- **Secure Credential Management:** All secrets (client IDs, tokens) are stored in Google Secret Manager, not in local files.
 
 ### 4. Core Components & State
 
-#### `EmailAgentState` (Defined in `src/state.py`)
+#### `EmailAgentState` (Defined in `src/agent/state.py`)
 
-This `TypedDict` is the central data structure (the "state") that is passed between all nodes in the LangGraph. It holds the agent's memory for the current run.
+This `TypedDict` is the central data structure passed between all nodes in the LangGraph. It holds the agent's memory for the current run.
 
-- `inbox: List[Email]`: The batch of emails fetched for the current run.
-- `current_email_index: int`: Pointer to the email currently being processed from the `inbox`.
-- `current_email: Optional[Email]`: The email object currently under analysis.
-- `classification: Optional[Literal[...]]`: The category assigned to the `current_email`.
-- `messages: Annotated[Sequence[BaseMessage], ...]`: The conversation history for the current email's reasoning loop. This is where the ReAct pattern is implemented.
-- `user_preferences: UserPreferences`: User-defined rules to guide agent behavior.
+```python
+class EmailAgentState(TypedDict):
+    # --- Batch Processing State ---
+    inbox: List[Email]
+    current_email_index: int
+    processed_email_ids: List[str]
+    fetch_emails_run_count: Optional[int]
 
-#### Email Fetching Layer (Defined in `src/tools/`)
+    # --- Per-Email Processing State ---
+    current_email: Optional[Email]
+    classification: Optional[Literal["priority", "meeting", "task", "invoice", "newsletter", "spam", "other"]]
+    summary: Optional[str]
+    extracted_data: Optional[Dict[str, Any]]
 
-- **`BaseEmailFetcher` (`email_fetcher.py`):** The abstract base class that mandates `connect`, `fetch_raw_unread_emails`, and `parse_email` methods.
-- **`GmailFetcher` (`email_fetcher.py`):**
-    - Implements `BaseEmailFetcher` for Gmail.
-    - Uses `google-auth-oauthlib` for the OAuth2 flow.
-    - Stores/retrieves credentials from Google Secret Manager secrets: `gmail-credentials` (client config) and `gmail-token` (user auth token).
-- **`OutlookFetcher` (`outlook_fetcher.py`):**
-    - Implements `BaseEmailFetcher` for Microsoft Outlook.
-    - Uses `msal` and the device flow for authentication.
-    - Stores/retrieves credentials from Google Secret Manager secrets: `outlook_credentials` (app client ID) and `outlook-token-cache` (user auth token).
+    # --- Core Reasoning State ---
+    messages: Annotated[Sequence[BaseMessage], add_messages]
+
+    # --- Configuration & Services ---
+    user_preferences: UserPreferences
+    email_actions_client: Optional[BaseEmailActions] = None
+    email_fetcher: Optional[BaseEmailFetcher] = None
+```
+
+#### Email Fetching & Tools
+
+- **`OutlookFetcher` (`src/tools/outlook_fetcher.py`):** The primary concrete implementation for fetching emails.
+    - Uses `msal` with a **device flow** for authentication.
+    - Caches the user token in Google Secret Manager (`outlook-token-cache`).
+    - **Crucially, it also requests `Calendars.ReadWrite` scope**, as the `OutlookCalendarTool` depends on its authenticated state.
+- **`OutlookCalendarTool` (`src/tools/calendar_tools.py`):** The concrete implementation for calendar actions.
+    - It is initialized with an `OutlookFetcher` instance to handle authentication.
+    - It performs **pre-execution validation** on date formats before making API calls to fail fast and provide better feedback to the LLM.
 
 ### 5. LangGraph Workflow
 
-The workflow is designed as a main loop that processes emails one by one from the fetched batch.
+The workflow is a main loop that processes emails one by one from the fetched batch.
 
-1.  **`fetch_emails`**: Entry point. Instantiates a fetcher, gets emails, and populates `state.inbox`.
+1.  **`fetch_emails`**: Entry point. Instantiates a fetcher (`OutlookFetcher`), gets emails, and populates `state.inbox`.
 2.  **`select_next_email`**: Selects the next email from the inbox to process.
 3.  **`classify_email`**: An LLM call to categorize the email.
-4.  **Router**: A conditional edge that sends the email to a specialized sub-graph based on its classification.
-5.  **Planner & Execution Loop**:
-    - **`plan_step`**: The core reasoning step where the LLM decides what to do next (call a tool, ask for human approval, or finish).
-    - **`execute_tools`**: A `ToolNode` that runs the function requested by the LLM.
-    - **`human_review`**: A node that pauses the graph to wait for user input.
+4.  **Router**: A conditional edge that sends the email to a specialized planner (`meeting_planner`, `task_planner`, etc.) based on its classification.
+5.  **Reasoning Loop**:
+    - **`plan_step`**: The core reasoning step where the LLM decides what to do next (call a tool, ask for human input, or finish).
+    - **`execute_tools`**: A `ToolNode` that runs the function requested by the LLM (e.g., `create_event`, `ask_user_for_input`). The output is fed back to `plan_step`.
 6.  **`update_run_state`**: Marks the email as processed and cleans up the state for the next iteration.
 7.  The loop continues until all emails in the `inbox` are processed.
 
@@ -71,9 +84,21 @@ The workflow is designed as a main loop that processes emails one by one from th
 
 - `/docs`: Contains the high-level design (`email_agent_design.md`) and requirements (`requirements.md`).
 - `/src`: Main source code.
-    - `state.py`: Defines the core `EmailAgentState`.
+    - `config.py`: Holds application-level configuration variables.
+    - `llm_factory.py`: Initializes and configures the Gemini LLM instance.
     - `logger.py`: Configures the project-wide logger.
-    - `test_fetcher.py`: A utility script to test the `GmailFetcher` and `OutlookFetcher` functionality directly.
-    - `/tools`: Contains agent tools.
-        - `email_fetcher.py`: Home of `BaseEmailFetcher` and `GmailFetcher`.
-        - `outlook_fetcher.py`: Home of `OutlookFetcher`.
+    - `utils.py`: Contains shared utility functions (e.g., `get_tools`).
+    - `/agent`: Core agent logic and LangGraph definition.
+        - `state.py`: Defines the central `EmailAgentState` TypedDict.
+        - `graph.py`: Builds and compiles the main LangGraph workflow, connecting all nodes and edges.
+        - `nodes.py`: Implements the primary graph nodes (e.g., `fetch_emails`, `classify_email`, `update_run_state`).
+        - `planner_nodes.py`: Implements the specialized planner nodes that kick off the reasoning loop (e.g., `meeting_planner`).
+        - `plan_step_node.py`: Contains the core ReAct reasoning node where the LLM decides the next action.
+        - `email_actions.py`: Implements provider-specific actions like marking emails as spam.
+    - `/prompts`: Manages all LLM prompts.
+        - `prompts.yaml`: Contains the raw text for all system and human prompts.
+        - `prompt_manager.py`: A singleton class that loads, manages, and provides formatted prompts to the agent.
+    - `/tools`: Contains tools for interacting with external services.
+        - `email_fetcher.py`: Defines the `BaseEmailFetcher` interface and `GmailFetcher`.
+        - `outlook_fetcher.py`: Defines the `OutlookFetcher` for Microsoft Graph API.
+        - `calendar_tools.py`: Defines the `OutlookCalendarTool` for creating and managing calendar events.

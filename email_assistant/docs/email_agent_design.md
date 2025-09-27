@@ -68,7 +68,13 @@ class EmailAgentState(TypedDict):
 
     # --- Configuration ---
     user_preferences: UserPreferences   # User-defined rules and settings
+    # The client for performing email actions (provider-agnostic)
+    email_actions_client: Optional[BaseEmailActions] = None
+    # The email fetcher instance, needed for tool selection
+    email_fetcher: Optional[BaseEmailFetcher] = None
 ```
+
+*Implementation Note: In practice, the agent state is dynamically augmented at runtime. The `fetch_emails_node` adds the active `email_fetcher` instance and a provider-specific `email_actions_client` (e.g., `OutlookActions`) to the state so they can be accessed by downstream nodes and tools.*
 
 **Key Fields:**
 
@@ -114,7 +120,10 @@ Provides the specific logic for connecting to the Gmail API, handling OAuth2, fe
 
 ##### 3.2.3. `OutlookFetcher` (Concrete Implementation)
 
-A separate concrete implementation for Microsoft Outlook, demonstrating how new providers can be added by adhering to the `BaseEmailFetcher` interface. It uses MSAL for authentication and the Microsoft Graph API for email operations, also leveraging Secret Manager for credentials.
+Provides the logic for Microsoft Outlook.
+*   **Authentication:** Uses the `msal` library to implement a device flow, which is robust for CLI applications. It caches the user's token in Google Secret Manager (`outlook-token-cache`) to enable silent authentication on subsequent runs.
+*   **Scopes:** Crucially, it requests not only mail permissions (`Mail.Read`) but also calendar permissions (`Calendars.ReadWrite`), as the `OutlookCalendarTool` relies on the fetcher's authenticated state to make its own API calls.
+*   **Credential Management:** Fetches the application's `client_id` from the `outlook_credentials` secret in Google Secret Manager.
 
 ##### 3.2.4. `fetch_emails_node` (LangGraph Node)
 
@@ -130,41 +139,50 @@ The agent's workflow is structured as a main batch processing loop that dispatch
 
 ```mermaid
 graph TD
-    subgraph "Batch Processing Loop"
-        direction LR
-        A[Start: fetch_emails] --> B{has_emails_to_process?};
-        B -- Yes --> C[select_next_email];
-        B -- No --> Z[END];
-        C --> D[classify_email];
-    end
-
-    subgraph "Email Processing Router"
+    subgraph "Email Processing Cycle"
         direction TB
-        D -- "meeting" --> E[meeting_planner];
-        D -- "task" --> F[task_planner];
-        D -- "invoice" --> G[invoice_planner];
-        D -- "other/priority" --> H[general_planner];
-        D -- "spam/newsletter" --> T[simple_triage_node];
-        T --> L[update_run_state];
-    end
+        A[fetch_emails] --> B{did_fetch_emails?};
+        B -- "Yes" --> C[check_for_emails];
+        B -- "No" --> Z[END];
 
-    subgraph "Reasoning & Action Loop (For each Planner)"
-        direction TB
-        E --> I{plan_step};
-        F --> I;
-        G --> I;
-        H --> I;
+        C -- "continue" --> D[select_next_email];
+        C -- "fetch_new" --> A;
+        C -- "end_workflow" --> Z;
         
-        I -- "Needs Tool" --> J[execute_tools];
-        J --> I;
-        I -- "Needs Human Approval" --> K[human_review];
-        K -- "Approve" --> J;
-        K -- "Reject/Edit" --> I;
-        I -- "Task Complete" --> L;
+        D --> E[classify_email];
     end
 
-    L --> B;
+    subgraph "Email Routing"
+        direction TB
+        E -- "meeting" --> F[meeting_planner];
+        E -- "task" --> G[task_planner];
+        E -- "invoice" --> H[invoice_planner];
+        E -- "other/priority" --> I[general_planner];
+        E -- "spam/newsletter" --> J[simple_triage];
+    end
+
+    subgraph "Reasoning & Action Loop"
+        direction TB
+        F --> K{plan_step};
+        G --> K;
+        H --> K;
+        I --> K;
+
+        K -- "tool_calls" --> L[execute_tools];
+        L --> K;
+        K -- "end_of_email" --> M[update_run_state];
+    end
+
+    subgraph "Finalization"
+        J --> M;
+        M --> C;
+    end
+
+    %% Style
+    classDef planner fill:#e6f2ff,stroke:#b3d9ff;
+    class F,G,H,I planner;
 ```
+
 Here's a breakdown based on the design:
 
    1. **Classifier as a Router:** The classify_email node acts as a "router" agent. Its sole responsibility is to perform an initial assessment and delegate the email to the correct specialist.
@@ -190,12 +208,12 @@ Here's a breakdown based on the design:
     *   **State Update:** Clears per-email specific fields (`classification`, `summary`, `extracted_data`, `messages`).        
 *   **`classify_email_node`**:
     *   **Purpose:** Initial triage and categorization of the `current_email`.
-    *   **Action:** Calls an LLM with the email's subject and body to determine its type (e.g., "priority", "meeting", "task", "invoice", "newsletter", "spam", "other").
+    *   **Action:** Calls an LLM using a structured prompt template loaded from `prompts.yaml` via the `PromptManager`. It includes robust parsing to handle variations in the LLM's output and defaults to "other" if the classification is invalid.
     *   **State Update:** Populates `state['classification']`.
 *   **`simple_triage_node`**: A dedicated node for straightforward actions like marking as spam or moving newsletters to a specific folder. This bypasses the complex reasoning loop for simple cases by directly using an `EmailActions` client.
 *   **`meeting_planner` / `task_planner` / `invoice_planner` / `general_planner`**:
     *   **Purpose:** Specialized entry points into the core reasoning loop, tailored to specific email types.
-    *   **Action:** These nodes (or the `plan_step` they lead to) will prompt the LLM with context-specific instructions (e.g., "You are a meeting scheduler...") and the `current_email` data.
+    *   **Action:** These nodes use the `PromptManager` to construct a detailed `ChatPromptTemplate` specific to their task (e.g., `get_meeting_planner_chat_prompt`). This template, which includes a system prompt with detailed instructions and a human prompt containing the email data, is used to create the initial `messages` list that kicks off the reasoning loop. The `meeting_planner` also intelligently retrieves the user's own email address from the fetcher's account details to ensure the user is included in event invitations.
 *   **`plan_step`**:
     *   **Purpose:** The core LLM-driven reasoning node. It analyzes the current state and decides the next action.
     *   **Action:** Calls an LLM (e.g., Gemini) with the `state['messages']` (which includes the email summary, extracted data, and previous LLM/tool outputs). The LLM decides whether to:
@@ -208,10 +226,12 @@ Here's a breakdown based on the design:
     *   **Purpose:** Executes the tools requested by the `plan_step` LLM.
     *   **Action:** This is a `ToolNode` that automatically calls the functions specified in `tool_calls` (e.g., `calendar_api.create_event`, `gmail_api.apply_label`).
     *   **State Update:** Appends `ToolMessage` (tool output) to `state['messages']`.
-*   **`human_review`**:
-    *   **Purpose:** Provides a human-in-the-loop mechanism for critical actions.
-    *   **Action:** Pauses the graph, presents the proposed action (e.g., draft email, calendar event details) to the user, and waits for explicit approval, modification, or cancellation.
-    *   **State Update:** Appends a `HumanMessage` with the user's decision to `state['messages']`.
+*   **`human_interaction` (Human-in-the-Loop)**:
+    *   **Purpose:** Provides two distinct mechanisms for human-in-the-loop interaction, ensuring the user remains in control.
+    *   **1. Information Gathering (via a Tool):** When the agent lacks sufficient information to proceed with a plan (e.g., an email asks to "schedule a meeting next week" without a specific time), it uses a dedicated tool called `ask_user_for_input`.
+        *   **Workflow:** The `plan_step` LLM calls this tool with a specific question. The tool's implementation pauses the graph and prompts the user for input via the command line. The user's response is returned as the tool's output, added to the `messages` history, and fed back into the `plan_step` node, allowing the LLM to resume planning with the new information. This models the user as just another tool the agent can query.
+    *   **2. Action Approval (via a `human_review` node):** For critical, state-changing actions (like sending an email or creating a calendar event), the agent first formulates the complete action. It then routes to a `human_review` node.
+        *   **Workflow:** This node pauses the graph and presents the fully-formed action to the user for a "yes/no" approval. Based on the user's decision, conditional edges route the workflow to either execute the action or abort and re-plan.
 *   **`update_run_state`**:
     *   **Purpose:** Marks the current email as processed and prepares the state for the next email in the batch.
     *   **Action:** Adds `current_email.id` to `state['processed_email_ids']` and clears all per-email specific fields (`current_email`, `classification`, `summary`, `extracted_data`, `messages`) to ensure a clean slate for the next iteration.
@@ -240,10 +260,13 @@ The agent will interact with external services through a set of well-defined too
     *   `update_email_labels`: To categorize and organize emails (e.g., mark as read, archive).
     *   `move_email_to_folder`: To move emails to specific folders.
     *   `mark_as_spam`: To report and move spam emails.
+*   **Human Interaction Tools:**
+    *   `ask_user_for_input`: Pauses the agent and asks the user a clarifying question to gather missing information needed for planning.
 *   **Calendar Tools:**
     *   `check_availability`: To query free/busy times in the user's calendar.
     *   `create_event`: To schedule new calendar events.
     *   `update_event`: To modify existing events.
+    
 *   **Task Management Tools:**
     *   `create_task`: To add items to a to-do list (e.g., Todoist, Asana).
     *   `set_reminder`: To schedule follow-up reminders.
