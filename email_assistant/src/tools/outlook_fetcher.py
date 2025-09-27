@@ -15,7 +15,11 @@ from email_assistant.src.tools.email_fetcher import BaseEmailFetcher
 class OutlookFetcher(BaseEmailFetcher):
     """A concrete implementation for fetching emails from Microsoft Outlook."""
 
-    SCOPES = ["https://graph.microsoft.com/Mail.Read"] # , "Calendars.ReadWrite", "Calendars.Read.Shared", "Calendars.ReadWrite.Shared"]
+    SCOPES = [
+        "https://graph.microsoft.com/Mail.Read",
+        "https://graph.microsoft.com/Calendars.ReadWrite"        
+    ]
+
     CREDENTIALS_SECRET_ID = "outlook_credentials"
     TOKEN_SECRET_ID = "outlook-token-cache"
     GRAPH_API_ENDPOINT = "https://graph.microsoft.com/v1.0"

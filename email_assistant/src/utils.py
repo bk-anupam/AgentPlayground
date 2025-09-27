@@ -11,8 +11,7 @@ from email_assistant.src.tools.outlook_fetcher import OutlookFetcher
 def get_tools(email_fetcher: BaseEmailFetcher) -> list:
     """Helper to get the list of tools based on the email fetcher type."""
     tools = [placeholder_tool]
-    if isinstance(email_fetcher, OutlookFetcher):
-        logger.info("Outlook fetcher detected, initializing Outlook calendar tools.")
+    if isinstance(email_fetcher, OutlookFetcher):        
         calendar_tool = OutlookCalendarTool(fetcher=email_fetcher)
         tools.extend([
             calendar_tool.check_availability,

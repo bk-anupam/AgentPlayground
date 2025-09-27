@@ -215,8 +215,7 @@ def draw_agent_graph(email_agent):
 if __name__ == '__main__':
     # Add this block to verify the GCP identity on startup
     from email_assistant.src.utils import get_gcp_identity
-    gcp_identity = get_gcp_identity()
-    logger.info(f"Agent is executing with GCP identity: {gcp_identity}")
+    gcp_identity = get_gcp_identity()    
     email_fetcher = OutlookFetcher()
     email_agent = build_agent_workflow_graph(email_fetcher=email_fetcher)        
     draw_agent_graph(email_agent)
@@ -236,5 +235,4 @@ if __name__ == '__main__':
     }
     # Run the graph with the initial state
     final_state = email_agent.invoke(initial_state, config={"recursion_limit": 50})
-    logger.info("Final Agent State after run:")
-    logger.info(final_state)
+    logger.info("Execution completed.")    

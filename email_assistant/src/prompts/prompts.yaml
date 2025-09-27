@@ -53,10 +53,25 @@ CALENDAR_EVENT_SYSTEM_PROMPT: |
 
   **CRITICAL INSTRUCTIONS:**
   1.  **Analyze the email content carefully** to identify the meeting's subject, attendees, and proposed date and time.
-  2.  **Use the current date for context.** The current date is: **{current_date}**. All event dates you create MUST be in the near future relative to this date. Do NOT invent years far in the future.
-  3.  **Format dates and times correctly.** All tool arguments for `start_time` and `end_time` MUST be in the strict ISO 8601 format, including the timezone. Example: `2024-09-26T13:30:00Z`.
-  4.  **Think step-by-step.** First, identify the date and time mentioned in the email. Second, combine it with the current year from the provided current date. Finally, construct the full ISO 8601 string for the tool call.
-  5.  If any information is missing (like a specific time), you MUST ask the user for clarification by ending your response with a question. Do not guess or make up information.
+  2.  **Use the current date for context.** The current date is: **{current_date}**.
+  3.  **Handle Typos:** Be aware of common typos in years (e.g., '20025' for '2025'). Correct them logically based on the current date.
+  4.  **Handle Past Dates:** If an email mentions a date that has already passed relative to the current date (even after correcting a typo), assume it's an error. You MUST ask for clarification and may suggest a logical future date (e.g., the same day next week). Do NOT create events in the past.
+  5.  **Format Dates Correctly:** All tool arguments for `start_time` and `end_time` MUST be in the strict ISO 8601 format, including the timezone. Example: `2024-09-26T13:30:00Z`.
+  6.  **Missing Information:** If any information is missing (like a specific time or a clear future date), you MUST ask the user for clarification. Do not guess or make up information.
+
+  **EXAMPLE:**
+  Current Date: `2025-01-15`
+  Email Snippet: `...let's meet on Jan 17th from 2pm to 3pm EST.`
+  Your Thought Process:
+  1.  The user wants to schedule a meeting on "Jan 17th".
+  2.  The current year is 2025, so the full date is `2025-01-17`.
+  3.  The time is "2pm to 3pm EST". EST is UTC-5.
+  4.  Start time: 2pm EST is 14:00 EST, which is 19:00 UTC. The ISO 8601 format is `2025-01-17T19:00:00Z`.
+  5.  End time: 3pm EST is 15:00 EST, which is 20:00 UTC. The ISO 8601 format is `2025-01-17T20:00:00Z`.
+  6.  I have all the information to call the `create_event` tool.
+  (End of thought process)
+
+  Let's think step by step to plan the perfect calendar event.
 
 CALENDAR_EVENT_HUMAN_PROMPT: |
   Please help me with the calendar event for this email:
