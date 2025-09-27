@@ -133,7 +133,48 @@ This is the initial node in the LangGraph workflow.
 *   **Action:** Instantiates a `GmailFetcher` (or other configured fetcher), calls its `get_emails` method, and populates the `state['inbox']` with the fetched `EmailObject`s. It also initializes `current_email_index` and clears per-email processing fields.
 *   **State Update:** `state['inbox']`, `state['current_email_index']`, `state['processed_email_ids']`, and clears per-email fields.
 
-### 4. LangGraph Workflow Architecture
+### 4. User Interface: Telegram Bot
+
+To ensure the agent is accessible and intuitive for non-technical users, the primary interface will be a Telegram bot. This approach moves beyond a simple CLI, providing a rich, interactive, and asynchronous experience.
+
+#### 4.1. Rationale
+
+*   **User-Friendly:** The chat interface is familiar to everyone, requiring no special training.
+*   **Rich Interactive Elements:** Telegram supports buttons and formatted messages, which are ideal for structured interactions like approvals and reports.
+*   **Asynchronous & Real-Time:** The agent can notify the user in real-time when input is needed, and the user can respond at their convenience.
+*   **Persistent History:** All interactions, including summary reports and user decisions, are automatically logged in the chat history.
+
+A user will initiate a processing run by sending a command (e.g., `/process_emails`) to the bot.
+
+#### 4.2. Human-in-the-Loop (HIL) Interactions
+
+All HIL tasks will be managed through the Telegram interface, providing a seamless experience.
+
+*   **Action Approval (`human_review` node):** When the agent needs to confirm a critical action, it will send a message with inline buttons.
+    > **🤖 Agent Bot:**
+    > I have drafted a reply to "John Doe". Shall I send it?
+    > `[ ✅ Send ]` `[ ❌ Cancel ]`
+*   **Information Gathering (`ask_user_for_input` tool):** When the agent needs more information, it will ask a question. It can provide suggestions as buttons or allow the user to type a response.
+    > **🤖 Agent Bot:**
+    > The email from "Alice" suggests a meeting but gives no time. What time should I propose?
+    > `[ Suggest Tomorrow Morning ]` `[ Suggest Tomorrow Afternoon ]`
+
+#### 4.3. Batch Execution Summary Report
+
+At the end of each batch run, the agent will send a consolidated summary report to the user via Telegram. This provides clear accountability for the agent's actions.
+
+The report will be structured as follows for each processed email:
+
+| Field                 | Description                                                     | Example                                                  |
+| :---------------------| :-------------------------------------------------------------- | :------------------------------------------------------- |
+| **Email ID**          | Clear identifier for the email.                                 | `From: a.smith@example.com`, `Subject: Project Sync`     |
+| **Classification**    | The category assigned by the agent.                             | `Meeting Request`                                        |
+| **Action Taken**      | The high-level action the agent performed.                      | `Scheduled Calendar Event`                               |
+| **Status**            | The final state of the action.                                  | `✅ Success`, `❌ Failure`, `🟡 Awaiting Approval`      |
+| **Details**           | A brief, human-readable explanation for the status.             | `Event "Project Sync" created for Oct 3.`                |
+
+
+### 5. LangGraph Workflow Architecture
 
 The agent's workflow is structured as a main batch processing loop that dispatches individual emails to specialized reasoning sub-graphs.
 
@@ -147,7 +188,7 @@ graph TD
 
         C -- "continue" --> D[select_next_email];
         C -- "fetch_new" --> A;
-        C -- "end_workflow" --> Z;
+        C -- "end_workflow" --> P[present_summary];
         
         D --> E[classify_email];
     end
@@ -176,6 +217,7 @@ graph TD
     subgraph "Finalization"
         J --> M;
         M --> C;
+        P --> Z;
     end
 
     %% Style
@@ -183,60 +225,26 @@ graph TD
     class F,G,H,I planner;
 ```
 
-Here's a breakdown based on the design:
+Here's a breakdown of the nodes:
 
-   1. **Classifier as a Router:** The classify_email node acts as a "router" agent. Its sole responsibility is to perform an initial assessment and delegate the email to the correct specialist.
+#### 5.1. Nodes (The "Doers")
 
-   2. **Specialized Sub-Agents (Planners):** The different planners (meeting_planner, task_planner, invoice_planner, etc.) are designed to be "specialized sub-agents."
-       * Focused Expertise: Each planner is the entry point to a sub-graph that is an expert in one domain. For example, the meeting_planner is primed with context and tools specifically for
-         scheduling, while the invoice_planner is focused on data extraction and financial workflows.
-       * Tailored Prompts: As the design document notes, these planners will prompt the LLM with context-specific instructions (e.g., "You are a meeting scheduler..."). This is a classic way
-         to invoke a specialized agent.
-       * Dedicated Tools: While not explicitly stated as a constraint, it's implied that each sub-agent would primarily use a toolset relevant to its specialty (e.g., calendar tools for the
-         meeting agent, task management tools for the task agent).
-
-  This is a powerful and common pattern in agentic design. Instead of one monolithic agent trying to do everything, you have a router that passes tasks to specialized agents who can
-  perform their function more efficiently and reliably.
-
-
-#### 4.1. Nodes (The "Doers")
-
-*   **`fetch_emails_node`**: (Already described) Entry point, fetches a batch of emails.
-*   **`select_next_email_node`**:
-    *   **Purpose:** Moves to the next email in the `inbox`.
-    *   **Action:** Increments `current_email_index` and sets `state['current_email']` to the next email in the `inbox`.
-    *   **State Update:** Clears per-email specific fields (`classification`, `summary`, `extracted_data`, `messages`).        
-*   **`classify_email_node`**:
-    *   **Purpose:** Initial triage and categorization of the `current_email`.
-    *   **Action:** Calls an LLM using a structured prompt template loaded from `prompts.yaml` via the `PromptManager`. It includes robust parsing to handle variations in the LLM's output and defaults to "other" if the classification is invalid.
-    *   **State Update:** Populates `state['classification']`.
-*   **`simple_triage_node`**: A dedicated node for straightforward actions like marking as spam or moving newsletters to a specific folder. This bypasses the complex reasoning loop for simple cases by directly using an `EmailActions` client.
-*   **`meeting_planner` / `task_planner` / `invoice_planner` / `general_planner`**:
-    *   **Purpose:** Specialized entry points into the core reasoning loop, tailored to specific email types.
-    *   **Action:** These nodes use the `PromptManager` to construct a detailed `ChatPromptTemplate` specific to their task (e.g., `get_meeting_planner_chat_prompt`). This template, which includes a system prompt with detailed instructions and a human prompt containing the email data, is used to create the initial `messages` list that kicks off the reasoning loop. The `meeting_planner` also intelligently retrieves the user's own email address from the fetcher's account details to ensure the user is included in event invitations.
-*   **`plan_step`**:
-    *   **Purpose:** The core LLM-driven reasoning node. It analyzes the current state and decides the next action.
-    *   **Action:** Calls an LLM (e.g., Gemini) with the `state['messages']` (which includes the email summary, extracted data, and previous LLM/tool outputs). The LLM decides whether to:
-        *   Call a tool (e.g., `create_calendar_event`, `add_to_todo_list`).
-        *   Generate a draft response.
-        *   Request human approval.
-        *   Indicate task completion for the current email.
-    *   **State Update:** Appends `AIMessage` (potentially with `tool_calls`) to `state['messages']`.
-*   **`execute_tools`**:
-    *   **Purpose:** Executes the tools requested by the `plan_step` LLM.
-    *   **Action:** This is a `ToolNode` that automatically calls the functions specified in `tool_calls` (e.g., `calendar_api.create_event`, `gmail_api.apply_label`).
-    *   **State Update:** Appends `ToolMessage` (tool output) to `state['messages']`.
+*   **`fetch_emails_node`**: Entry point, fetches a batch of emails.
+*   **`select_next_email_node`**: Moves to the next email in the `inbox`.
+*   **`classify_email_node`**: Initial triage and categorization of the `current_email`.
+*   **`simple_triage_node`**: For straightforward actions like archiving, bypassing the complex reasoning loop.
+*   **`meeting_planner` / `task_planner` / `invoice_planner` / `general_planner`**: Specialized entry points into the core reasoning loop, tailored to specific email types.
+*   **`plan_step`**: The core LLM-driven reasoning node that decides the next action (call a tool, request approval, finish).
+*   **`execute_tools`**: A `ToolNode` that runs the functions requested by the `plan_step` LLM.
 *   **`human_interaction` (Human-in-the-Loop)**:
-    *   **Purpose:** Provides two distinct mechanisms for human-in-the-loop interaction, ensuring the user remains in control.
-    *   **1. Information Gathering (via a Tool):** When the agent lacks sufficient information to proceed with a plan (e.g., an email asks to "schedule a meeting next week" without a specific time), it uses a dedicated tool called `ask_user_for_input`.
-        *   **Workflow:** The `plan_step` LLM calls this tool with a specific question. The tool's implementation pauses the graph and prompts the user for input via the command line. The user's response is returned as the tool's output, added to the `messages` history, and fed back into the `plan_step` node, allowing the LLM to resume planning with the new information. This models the user as just another tool the agent can query.
-    *   **2. Action Approval (via a `human_review` node):** For critical, state-changing actions (like sending an email or creating a calendar event), the agent first formulates the complete action. It then routes to a `human_review` node.
-        *   **Workflow:** This node pauses the graph and presents the fully-formed action to the user for a "yes/no" approval. Based on the user's decision, conditional edges route the workflow to either execute the action or abort and re-plan.
-*   **`update_run_state`**:
-    *   **Purpose:** Marks the current email as processed and prepares the state for the next email in the batch.
-    *   **Action:** Adds `current_email.id` to `state['processed_email_ids']` and clears all per-email specific fields (`current_email`, `classification`, `summary`, `extracted_data`, `messages`) to ensure a clean slate for the next iteration.
+    *   **Information Gathering (`ask_user_for_input` tool):** The `plan_step` LLM calls this tool with a question. The tool's implementation pauses the graph and sends the question to the user via the **Telegram Bot**. The user's response is returned as the tool's output, allowing the LLM to resume planning.
+    *   **Action Approval (`human_review` node):** For critical actions, the agent routes to this node. It pauses the graph and presents the action to the user for "yes/no" approval via **Telegram buttons**. Conditional edges then route the workflow based on the user's decision.
+*   **`update_run_state`**: Marks the current email as processed and collects its outcome data for the final report. It adds a summary dictionary for the processed email to a `run_summary` list in the agent state.
+*   **`present_summary` (New Node)**:
+    *   **Purpose:** To report the final results to the user.
+    *   **Action:** This is the final node in the workflow. It takes the `run_summary` list from the agent state, formats it into the **Batch Execution Summary Report**, and sends it as a single message to the user via the **Telegram Bot**.
 
-#### 4.2. Edges (The "Deciders")
+#### 5.2. Edges (The "Deciders")
 
 *   **`has_emails_to_process?`**: A conditional edge that controls the main batch processing loop. It checks if `state['current_email_index']` is within the bounds of `state['inbox']`.
 *   **`classify_email` -> Router**: A conditional edge that routes the `current_email` to the appropriate specialized planner based on `state['classification']`.
@@ -250,8 +258,9 @@ Here's a breakdown based on the design:
     *   `Reject/Edit` -> `plan_step` (to allow the LLM to re-plan or generate a new draft).
     *   `Cancel` -> `update_run_state` (to stop processing this email).
 *   **`update_run_state` -> `has_emails_to_process?`**: Closes the loop for the current email and returns to check for the next email in the batch.
+*   **`check_for_emails` -> `present_summary`**: When all emails in the batch have been processed, this edge directs the graph to the final reporting node.
 
-### 5. Tool Integration Layer
+### 6. Tool Integration Layer
 
 The agent will interact with external services through a set of well-defined tools and action clients.
 
@@ -261,7 +270,7 @@ The agent will interact with external services through a set of well-defined too
     *   `move_email_to_folder`: To move emails to specific folders.
     *   `mark_as_spam`: To report and move spam emails.
 *   **Human Interaction Tools:**
-    *   `ask_user_for_input`: Pauses the agent and asks the user a clarifying question to gather missing information needed for planning.
+    *   `ask_user_for_input`: Pauses the agent and asks the user a clarifying question via the **Telegram Bot**.
 *   **Calendar Tools:**
     *   `check_availability`: To query free/busy times in the user's calendar.
     *   `create_event`: To schedule new calendar events.
@@ -275,13 +284,13 @@ The agent will interact with external services through a set of well-defined too
     *   `create_lead`: To add new contacts to a CRM system.
     *   `update_contact_info`: To update existing contact details.
 
-### 6. Memory and Persistence
+### 7. Memory and Persistence
 
-*   **LangGraph Checkpointer:** Utilizes LangGraph's built-in checkpointer (e.g., `MemorySaver` for development, `FirestoreSaver` for production) to persist the agent's state across runs and allow for recovery or inspection.
-*   **Thread-based Execution:** LangGraph's `thread_id` mechanism will be used to manage separate conversational states for different processing contexts if needed, though for email processing, a single thread per batch run is initially sufficient.
+*   **LangGraph Checkpointer:** Utilizes LangGraph's built-in checkpointer to persist the agent's state. This is critical for the asynchronous nature of the Telegram interface, allowing the agent to pause and wait for user input without losing context.
+*   **Thread-based Execution:** A unique `thread_id` (which can be based on the Telegram `chat_id`) will be used to maintain a separate conversational state for each user interacting with the bot.
 
-### 7. Configuration and Customization
+### 8. Configuration and Customization
 
-*   **`UserPreferences`:** The `RefinedEmailAgentState` includes a `UserPreferences` object to store user-specific rules, such as priority senders, auto-archiving rules, and approval thresholds for automated actions.
-*   **Environment Variables:** Critical configurations (API keys, model names, log levels) are managed via environment variables and a `.env` file.
+*   **`UserPreferences`:** The `EmailAgentState` includes a `UserPreferences` object to store user-specific rules.
+*   **Environment Variables:** Critical configurations (API keys, model names, **Telegram Bot Token**) are managed via environment variables.
 *   **Secret Manager:** All sensitive credentials are externalized to Google Secret Manager.

@@ -78,6 +78,7 @@ class OutlookCalendarTool(BaseCalendarTool):
         self.fetcher = fetcher
         self.base_url = "https://graph.microsoft.com/v1.0"
 
+
     def _get_access_token(self) -> str:
         """Acquires an access token silently using the fetcher's authenticated state."""
         if not self.fetcher.app or not self.fetcher.account:
@@ -94,6 +95,7 @@ class OutlookCalendarTool(BaseCalendarTool):
             raise Exception("Authentication failed. Could not get access token for calendar tool.")
         return result["access_token"]
 
+
     def _make_api_call(self, method: str, endpoint: str, json_data: Dict = None) -> Dict[str, Any]:
         """Helper function to make API calls to Microsoft Graph."""
         try:
@@ -109,6 +111,7 @@ class OutlookCalendarTool(BaseCalendarTool):
         except Exception as e:
             logger.error(f"An unexpected error occurred during API call to {endpoint}: {e}")
             raise
+
 
     def check_availability(
         self, 
@@ -127,6 +130,7 @@ class OutlookCalendarTool(BaseCalendarTool):
         }
         response_data = self._make_api_call("POST", endpoint, json_data=payload)
         return response_data.get('value', [])
+
 
     def create_event(
         self, 
@@ -158,6 +162,7 @@ class OutlookCalendarTool(BaseCalendarTool):
             "attendees": [{"emailAddress": {"address": attendee}, "type": "required"} for attendee in attendees]
         }
         return self._make_api_call("POST", endpoint, json_data=event)
+
 
     def update_event(
         self, 
